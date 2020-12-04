@@ -31,13 +31,17 @@ class ViewController: UIViewController {
         Alamofire.request(address).responseString {  response in
             switch response.result{
             case .success(let JSONstring):
-                var text = "";
                 let json = JSON.init(parseJSON:JSONstring)
-                for(_, subJson) in json{
-                    text = text + subJson["full_name"].string! + "\n"
+                if(json["full_name"].string != nil){
+                    var text = "";
+                    for(_, subJson) in json{
+                        text = text + subJson["full_name"].string! + "\n"
+                    }
+                    print(text)
+                    self.resultLabel.text = text
+                } else {
+                    self.resultLabel.text = "User not found"
                 }
-                print(text)
-                self.resultLabel.text = text
             case .failure(_):
                 self.resultLabel.text = "Error"
             }
