@@ -32,7 +32,7 @@ class ViewController: UIViewController {
             switch response.result{
             case .success(let JSONstring):
                 let json = JSON.init(parseJSON:JSONstring)
-                if(json["full_name"].string != nil){
+                if(json[0]["full_name"].string != nil){
                     var text = "";
                     for(_, subJson) in json{
                         text = text + subJson["full_name"].string! + "\n"
