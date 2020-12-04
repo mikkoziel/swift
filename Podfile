@@ -6,8 +6,9 @@ target 'myFirstApp' do
   use_frameworks!
 
   # Pods for myFirstApp
-pod 'Alamofire', '~> 4.0'
+pod 'Alamofire', '~> 4.2.0'
 pod 'SwiftSpinner'
+pod 'SwiftyJSON', '~> 4.2.0'
 
   target 'myFirstAppTests' do
     inherit! :search_paths

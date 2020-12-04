@@ -1,7 +1,7 @@
 //
 //  Request.swift
 //
-//  Copyright (c) 2014 Alamofire Software Foundation (http://alamofire.org/)
+//  Copyright (c) 2014-2016 Alamofire Software Foundation (http://alamofire.org/)
 //
 //  Permission is hereby granted, free of charge, to any person obtaining a copy
 //  of this software and associated documentation files (the "Software"), to deal
@@ -46,7 +46,7 @@ public typealias RequestRetryCompletion = (_ shouldRetry: Bool, _ timeDelay: Tim
 public protocol RequestRetrier {
     /// Determines whether the `Request` should be retried by calling the `completion` closure.
     ///
-    /// This operation is fully asynchronous. Any amount of time can be taken to determine whether the request needs
+    /// This operation is fully asychronous. Any amount of time can be taken to determine whether the request needs
     /// to be retried. The one requirement is that the completion closure is called to ensure the request is properly
     /// cleaned up after.
     ///
@@ -102,7 +102,7 @@ open class Request {
     open var task: URLSessionTask? { return delegate.task }
 
     /// The session belonging to the underlying task.
-    public let session: URLSession
+    open let session: URLSession
 
     /// The request sent or to be sent to the server.
     open var request: URLRequest? { return task?.originalRequest }
@@ -184,7 +184,7 @@ open class Request {
     /// - parameter password: The password.
     ///
     /// - returns: A tuple with Authorization header and credential value if encoding succeeds, `nil` otherwise.
-    open class func authorizationHeader(user: String, password: String) -> (key: String, value: String)? {
+    open static func authorizationHeader(user: String, password: String) -> (key: String, value: String)? {
         guard let data = "\(user):\(password)".data(using: .utf8) else { return nil }
 
         let credential = data.base64EncodedString(options: [])
@@ -269,7 +269,7 @@ extension Request: CustomDebugStringConvertible {
     }
 
     func cURLRepresentation() -> String {
-        var components = ["$ curl -v"]
+        var components = ["$ curl -i"]
 
         guard let request = self.request,
               let url = request.url,
@@ -293,12 +293,11 @@ extension Request: CustomDebugStringConvertible {
 
             if let credentials = credentialStorage.credentials(for: protectionSpace)?.values {
                 for credential in credentials {
-                    guard let user = credential.user, let password = credential.password else { continue }
-                    components.append("-u \(user):\(password)")
+                    components.append("-u \(credential.user!):\(credential.password!)")
                 }
             } else {
-                if let credential = delegate.credential, let user = credential.user, let password = credential.password {
-                    components.append("-u \(user):\(password)")
+                if let credential = delegate.credential {
+                    components.append("-u \(credential.user!):\(credential.password!)")
                 }
             }
         }
@@ -309,27 +308,26 @@ extension Request: CustomDebugStringConvertible {
                 let cookies = cookieStorage.cookies(for: url), !cookies.isEmpty
             {
                 let string = cookies.reduce("") { $0 + "\($1.name)=\($1.value);" }
-
-            #if swift(>=3.2)
-                components.append("-b \"\(string[..<string.index(before: string.endIndex)])\"")
-            #else
                 components.append("-b \"\(string.substring(to: string.characters.index(before: string.endIndex)))\"")
-            #endif
             }
         }
 
         var headers: [AnyHashable: Any] = [:]
 
-        session.configuration.httpAdditionalHeaders?.filter {  $0.0 != AnyHashable("Cookie") }
-                                                    .forEach { headers[$0.0] = $0.1 }
+        if let additionalHeaders = session.configuration.httpAdditionalHeaders {
+            for (field, value) in additionalHeaders where field != AnyHashable("Cookie") {
+                headers[field] = value
+            }
+        }
 
-        request.allHTTPHeaderFields?.filter { $0.0 != "Cookie" }
-                                    .forEach { headers[$0.0] = $0.1 }
+        if let headerFields = request.allHTTPHeaderFields {
+            for (field, value) in headerFields where field != "Cookie" {
+                headers[field] = value
+            }
+        }
 
-        components += headers.map {
-            let escapedValue = String(describing: $0.value).replacingOccurrences(of: "\"", with: "\\\"")
-
-            return "-H \"\($0.key): \(escapedValue)\""
+        for (field, value) in headers {
+            components.append("-H \"\(field): \(value)\"")
         }
 
         if let httpBodyData = request.httpBody, let httpBody = String(data: httpBodyData, encoding: .utf8) {
@@ -358,7 +356,7 @@ open class DataRequest: Request {
         func task(session: URLSession, adapter: RequestAdapter?, queue: DispatchQueue) throws -> URLSessionTask {
             do {
                 let urlRequest = try self.urlRequest.adapt(using: adapter)
-                return queue.sync { session.dataTask(with: urlRequest) }
+                return queue.syncResult { session.dataTask(with: urlRequest) }
             } catch {
                 throw AdaptError(error: error)
             }
@@ -461,9 +459,9 @@ open class DownloadRequest: Request {
                 switch self {
                 case let .request(urlRequest):
                     let urlRequest = try urlRequest.adapt(using: adapter)
-                    task = queue.sync { session.downloadTask(with: urlRequest) }
+                    task = queue.syncResult { session.downloadTask(with: urlRequest) }
                 case let .resumeData(resumeData):
-                    task = queue.sync { session.downloadTask(withResumeData: resumeData) }
+                    task = queue.syncResult { session.downloadTask(withResumeData: resumeData) }
                 }
 
                 return task
@@ -497,19 +495,8 @@ open class DownloadRequest: Request {
     // MARK: State
 
     /// Cancels the request.
-    override open func cancel() {
-        cancel(createResumeData: true)
-    }
-
-    /// Cancels the request.
-    ///
-    /// - parameter createResumeData: Determines whether resume data is created via the underlying download task or not.
-    open func cancel(createResumeData: Bool) {
-        if createResumeData {
-            downloadDelegate.downloadTask.cancel { self.downloadDelegate.resumeData = $0 }
-        } else {
-            downloadDelegate.downloadTask.cancel()
-        }
+    open override func cancel() {
+        downloadDelegate.downloadTask.cancel { self.downloadDelegate.resumeData = $0 }
 
         NotificationCenter.default.post(
             name: Notification.Name.Task.DidCancel,
@@ -577,13 +564,13 @@ open class UploadRequest: DataRequest {
                 switch self {
                 case let .data(data, urlRequest):
                     let urlRequest = try urlRequest.adapt(using: adapter)
-                    task = queue.sync { session.uploadTask(with: urlRequest, from: data) }
+                    task = queue.syncResult { session.uploadTask(with: urlRequest, from: data) }
                 case let .file(url, urlRequest):
                     let urlRequest = try urlRequest.adapt(using: adapter)
-                    task = queue.sync { session.uploadTask(with: urlRequest, fromFile: url) }
+                    task = queue.syncResult { session.uploadTask(with: urlRequest, fromFile: url) }
                 case let .stream(_, urlRequest):
                     let urlRequest = try urlRequest.adapt(using: adapter)
-                    task = queue.sync { session.uploadTask(withStreamedRequest: urlRequest) }
+                    task = queue.syncResult { session.uploadTask(withStreamedRequest: urlRequest) }
                 }
 
                 return task
@@ -647,9 +634,9 @@ open class StreamRequest: Request {
 
             switch self {
             case let .stream(hostName, port):
-                task = queue.sync { session.streamTask(withHostName: hostName, port: port) }
+                task = queue.syncResult { session.streamTask(withHostName: hostName, port: port) }
             case let .netService(netService):
-                task = queue.sync { session.streamTask(with: netService) }
+                task = queue.syncResult { session.streamTask(with: netService) }
             }
 
             return task

@@ -9,6 +9,7 @@
 import UIKit
 import Alamofire
 import SwiftSpinner
+import SwiftyJSON
 
 class ViewController: UIViewController {
 
@@ -22,15 +23,21 @@ class ViewController: UIViewController {
     }
 
     @IBAction func buttonPressed(_ sender: Any) {
+        
         SwiftSpinner.show("Downloading data");
         let user: String? = inputText.text;
         
         let address = "https://api.github.com/users/" + user! + "/repos"
         Alamofire.request(address).responseString {  response in
             switch response.result{
-            case .success(let JSON):
-                self.resultLabel.text = JSON
-                print(JSON)
+            case .success(let JSONstring):
+                var text = "";
+                let json = JSON.init(parseJSON:JSONstring)
+                for(_, subJson) in json{
+                    text = text + subJson["full_name"].string! + "\n"
+                }
+                print(text)
+                self.resultLabel.text = text
             case .failure(_):
                 self.resultLabel.text = "Error"
             }
